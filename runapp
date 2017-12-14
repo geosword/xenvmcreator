@@ -1,0 +1,3 @@
+#!/bin/bash
+DOCKER=`which docker`
+$DOCKER run -v `pwd`:/app/ -it golang:app go run ${1}
