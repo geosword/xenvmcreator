@@ -5,37 +5,70 @@ import (
 	"log"
 	"os"
 	"flag"
+	"strconv"
+	"strings"
+	"log/syslog"
+	"regexp"
 )
 
 // use to "test" exec_cmd will output the command passed to it, rather than actually execute it
-const outputOnly=true
+const outputOnly=false
 
 func exec_cmd(cmd string, outputonly bool) string {
 	if !outputonly  {
+		log.Print("Running [" + cmd + "]")
 		out, err :=exec.Command("/bin/bash", "-c", cmd).Output()
+		output := strings.TrimSpace(string(out))
+		log.Print("TRIMMED Output was [" + output + "]")
 		if err != nil {
+			// TODO roll back whats been done if a vital step fails.
 			log.Fatal(err)
 			os.Exit(1)
 		}
-		return string(out)
+		// trim off the CR at the end of any output
+		return output
 	} else {
 		return cmd	
 	}
 }
 
 func main() {
-	// flag.StringVar(&flagvmname,"name","blah","The name of the VM to create")
 	vmtemplatePtr		:= flag.String("template","","The Name of the XenServer template to use")
 	vmnamePtr 			:= flag.String("name","blah","The name of the VM to create")
-	//vmcpusPtr 		:= flag.Int("cpus",1,"the number of vCPUs to assign to the VM")
+	vmcpusPtr 			:= flag.Int("cpus",1,"the number of vCPUs to assign to the VM")
 	vmemoryPtr	 		:= flag.String("memory","1GiB","The number of MEGABYTES RAM to assign to the VM")
-	//vmdisksizePtr		:= flag.Int("disksize",20,"The number of GiB to allocate to the disk")
+	vmdisksizePtr		:= flag.String("disksize","10GiB","The number of GiB to allocate to the disk")
 	vmnetworkPtr		:= flag.String("network","","The name of the network to connect the vm to")
 	vmisoPtr			:= flag.String("iso","","The name of the ISO from which to first-time-boot the vm")
 
 	flag.Parse()
 	var vm_unwantedoutput =""
 	
+	logwriter, e := syslog.New(syslog.LOG_NOTICE, "heckle")
+    if e == nil {
+        log.SetOutput(logwriter)
+    }
+
+	// STEP 0 validate the inputs
+	sizeCheck := regexp.MustCompile(`[0-9]+[GMK]iB`)
+	matches := sizeCheck.FindAllString(*vmemoryPtr,-1)
+	if matches == nil {
+		fmt.Println("Memory must be a number followed by (G|M|K)iB")
+		os.Exit(1)
+	}
+
+
+	matches = sizeCheck.FindAllString(*vmdisksizePtr,-1)
+	if matches == nil {
+		fmt.Println("Disk size must be a number followed by (G|M|K)iB")
+		os.Exit(1)
+	}
+
+	if *vmcpusPtr < 1 {
+		fmt.Println("CPUs must be a positive integer")
+		os.Exit(1)
+	}
+
 	// STEP 1
 	// create the VM with the required template
 	var vm_uuid =""
@@ -47,53 +80,75 @@ func main() {
 	}
 	
 	// STEP 2 now we need to disable booting from the automatically assigned disk
-	var vm_disk_uuid =""
-	var vmcmd_disableboot =""
+	var vm_disk_uuid = exec_cmd("xe vbd-list --minimal vm-uuid=" + vm_uuid + " userdevice=0",outputOnly)
 	// get the uuid of the disk assigned to our new vm
-	vm_disk_uuid = exec_cmd("xe vbd-list vm-uuid=" + vm_uuid + " userdevice=0",outputOnly)
 	fmt.Println(vm_disk_uuid)
 	// now disable booting from it (we want to boot from the cdrom)
 	if outputOnly {
 		vm_disk_uuid="vm_disk_uuid"
-	}	
-	vmcmd_disableboot = "xe vbd-param-set uuid=" + vm_disk_uuid + " bootable=false"
-	vm_unwantedoutput = exec_cmd(vmcmd_disableboot,outputOnly)
+	}
+	vm_unwantedoutput = exec_cmd("xe vbd-param-set uuid=" + vm_disk_uuid + " bootable=false",outputOnly)
 	fmt.Println(vm_unwantedoutput)
+	// STEP 3 make the drive the size we want it
+	// we do this here because there will only be one VDI/VBD to parse
+	// xe vbd-list params=vdi-uuid --minimal vm-uuid=
+	var vm_vdi_uuid = exec_cmd("xe vbd-list params=vdi-uuid --minimal vm-uuid=" + vm_uuid,outputOnly)
+	fmt.Println(vm_vdi_uuid)
+	if outputOnly {
+		vm_vdi_uuid="vm_vdi_uuid"
+	}
+	//xe vdi-resize uuid=[VDI uuid] disk-size=20GiB
+	vm_unwantedoutput = exec_cmd("xe vdi-resize uuid=" + vm_vdi_uuid + " disk-size=" + *vmdisksizePtr , outputOnly)
+	fmt.Println(vm_unwantedoutput)
+
+	// STEP 4 now we add a cd drive and "insert" the cd image
 	
-	// STEP 3 now we add a cd drive and "insert" the cd image
-	var vm_cd_uuid =""
-	vm_unwantedoutput = exec_cmd("xe vm-cd-add vm=\"" + *vmnamePtr + "\" cd-name=\"" + *vmisoPtr + "\" device=3",outputOnly)
+	vm_unwantedoutput = exec_cmd("xe vm-cd-add uuid=" + vm_uuid + " cd-name=\"" + *vmisoPtr + "\" device=3",outputOnly)
 	fmt.Println(vm_unwantedoutput)
 
 	// now we need to list device 3 (the cdrom) of the vm, and get the devices uuid, so we can enable booting on that.
-	vm_cd_uuid = exec_cmd("xe vbd-list vm-name-label=\"" + *vmnamePtr + "\" userdevice=3",outputOnly)
+	var vm_cd_uuid = exec_cmd("xe vbd-list --minimal vm-uuid=" + vm_uuid + " userdevice=3",outputOnly)
+
 	fmt.Println(vm_cd_uuid)	
 	if outputOnly {
     	vm_cd_uuid="vm_cd_uuid"
     }
 	//xe vbd-param-set  uuid=[device uuid] bootable=true
-	vm_unwantedoutput = exec_cmd("xe vbd-param-set  uuid=\"" + vm_cd_uuid  + "\" bootable=true", outputOnly)
+	vm_unwantedoutput = exec_cmd("xe vbd-param-set uuid=" + vm_cd_uuid  + " bootable=true", outputOnly)
 	fmt.Println(vm_unwantedoutput)	
 	// xe vm-param-set uuid=[VM uuid] other-config:install-repository=cdrom
 	vm_unwantedoutput = exec_cmd("xe vm-param-set uuid=" + vm_uuid + " other-config:install-repository=cdrom", outputOnly)
 	fmt.Println(vm_unwantedoutput)
 	
 
-	// STEP 4 now on to setting up the network
+	// STEP 5 now on to setting up the network
 	//xe network-list --minimal name-label="CG 1072"	
-	var vm_network_uuid =""
-	vm_network_uuid = exec_cmd("xe network-list --minimal name-label=\"" + *vmnetworkPtr + "\"", outputOnly)
+	var vm_network_uuid = exec_cmd("xe network-list --minimal name-label=\"" + *vmnetworkPtr + "\"", outputOnly)
+	fmt.Println(vm_network_uuid)
 	if outputOnly {
     	vm_network_uuid="vm_network_uuid"
     }
+    
 	//xe vif-create vm-uuid=[VM uuid] network-uuid=[network uuid] device=0
-	vm_unwantedoutput = exec_cmd("xe vif-create vm-uuid=\"" + vm_uuid + "\" network-uuid=\"" + vm_network_uuid + "\" device=0", outputOnly)
+	vm_unwantedoutput = exec_cmd("xe vif-create vm-uuid=" + vm_uuid + " network-uuid=" + vm_network_uuid + " device=0", outputOnly)
 	fmt.Println(vm_unwantedoutput)
 	
-	// STEP 5 now set the RAM accordingly
+	// STEP 6 now set the RAM accordingly
 	// xe vm-memory-limits-set dynamic-max=VM MEMORY dynamic-min=VM MEMORY static-max=VM MEMORY static-min=VM MEMORY name-label="newVM"
 	vm_unwantedoutput = exec_cmd("xe vm-memory-limits-set dynamic-max=" + 
-			*vmemoryPtr + " dynamic-min=" + *vmemoryPtr + " static-max=" + *vmemoryPtr + 
-			" static-min=" + *vmemoryPtr + " name-label=\"" + *vmnamePtr + "\"", outputOnly)
+				*vmemoryPtr + " dynamic-min=" + *vmemoryPtr + " static-max=" + *vmemoryPtr + 
+					" static-min=" + *vmemoryPtr + " uuid=" + vm_uuid, outputOnly)
 	fmt.Println(vm_unwantedoutput)
+
+	// STEP 7 set the number of VCPUs
+	vm_unwantedoutput = exec_cmd("xe vm-param-set uuid=" + vm_uuid + " platform:cores-per-socket=1 VCPUs-max=" + strconv.Itoa(*vmcpusPtr), outputOnly)
+	fmt.Println(vm_unwantedoutput)
+	vm_unwantedoutput = exec_cmd("xe vm-param-set uuid=" + vm_uuid + " platform:cores-per-socket=1 VCPUs-at-startup=" + strconv.Itoa(*vmcpusPtr), outputOnly)
+	fmt.Println(vm_unwantedoutput)
+
+	// STEP 8 set the boot parameters so that it goes and gets our preseed file and doesnt ask any questions
+	// xe vm-param-set PV-args="auto priority=critical keymap=gb locale=en_GB hostname=preseedtest url=http://10.0.1.10/preseed-stretch.cfg -- quiet console=hvc0" vm=VMNAME
+	vm_unwantedoutput = exec_cmd("xe vm-param-set PV-args=\"auto priority=critical keymap=gb locale=en_GB hostname=preseedtest url=http://10.0.1.10/preseed-stretch.cfg -- quiet console=hvc0\" uuid=" + vm_uuid, outputOnly)
+	fmt.Println(vm_unwantedoutput)
+	// READY!!!! 
 }
