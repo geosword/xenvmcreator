@@ -1,8 +1,0 @@
-#!/bin/bash
-DOCKER=`which docker`
-OPERATION="${@: -1}"
-if [ "${1}" == "${OPERATION}" ]; then
-	# there is only one parameter, so make it run it
-	OPERATION="run"
-fi
-$DOCKER run -v `pwd`:/app/ -it golang:app go ${OPERATION} ${1}

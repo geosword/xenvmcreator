@@ -12,7 +12,11 @@ import (
 )
 
 // use to "test" exec_cmd will output the command passed to it, rather than actually execute it
-const outputOnly=false
+// TODO make outputOnly a command line parameter. 
+// TODO find a more elegant way ( ? : notation ) for if outputOnly { ...} on the print blah stuff
+// const outputOnly=false
+
+var version string
 
 func exec_cmd(cmd string, outputonly bool) string {
 	if !outputonly  {
@@ -40,9 +44,21 @@ func main() {
 	vmdisksizePtr		:= flag.String("disksize","10GiB","The number of GiB to allocate to the disk")
 	vmnetworkPtr		:= flag.String("network","","The name of the network to connect the vm to")
 	vmisoPtr			:= flag.String("iso","","The name of the ISO from which to first-time-boot the vm")
+	vmoutputonlyPtr		:= flag.Bool("outputonly",false,"If set it will only output the commands it would execute, naturally without the correct parameter values set.")
+	vmversionPtr		:= flag.Bool("version",false,"show the version and date of the build")
+	// for some reason specifying start as a boolean, results in *vmstartPtr ALWAYS being false. This is just a work around
+	vmstartPtr			:= flag.Int("start",0,"If set it will start the vm once created")
+
 
 	flag.Parse()
 	var vm_unwantedoutput =""
+	
+	outputOnly := *vmoutputonlyPtr
+
+	if *vmversionPtr {
+		fmt.Println("version " + version)
+		os.Exit(0)
+	}
 	
 	logwriter, e := syslog.New(syslog.LOG_NOTICE, "heckle")
     if e == nil {
@@ -115,8 +131,9 @@ func main() {
 	// now we need to list device 3 (the cdrom) of the vm, and get the devices uuid, so we can enable booting on that.
 	var vm_cd_uuid = exec_cmd("xe vbd-list --minimal vm-uuid=" + vm_uuid + " userdevice=3",outputOnly)
 
-	fmt.Println(vm_cd_uuid)	
+	
 	if outputOnly {
+    	fmt.Println(vm_cd_uuid)	
     	vm_cd_uuid="vm_cd_uuid"
     }
 	//xe vbd-param-set  uuid=[device uuid] bootable=true
@@ -133,8 +150,9 @@ func main() {
 	// STEP 5 now on to setting up the network
 	//xe network-list --minimal name-label="CG 1072"	
 	var vm_network_uuid = exec_cmd("xe network-list --minimal name-label=\"" + *vmnetworkPtr + "\"", outputOnly)
-	fmt.Println(vm_network_uuid)
+	
 	if outputOnly {
+		fmt.Println(vm_network_uuid)
     	vm_network_uuid="vm_network_uuid"
     }
     
@@ -170,4 +188,9 @@ func main() {
 		fmt.Println(vm_unwantedoutput)
 	}
 	// READY!!!! 
+	if *vmstartPtr==1 {
+		vm_unwantedoutput = exec_cmd("xe vm-start uuid=" + vm_uuid, outputOnly)
+	} else {
+		fmt.Println("Not starting")
+	}
 }

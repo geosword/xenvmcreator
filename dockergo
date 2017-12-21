@@ -1,0 +1,12 @@
+#!/bin/bash
+# just a wrapper for running the go container with the right volume mapping.
+DOCKER=`which docker`
+# this loop is needed to maintain quotes around certain parameters.
+# https://stackoverflow.com/questions/1668649/how-to-keep-quotes-in-bash-arguments
+# What it actually does is quotes ALL parameters.
+PARAMS=''
+for i in "$@"; do 
+    i="${i//\\/\\\\}"
+    PARAMS="$PARAMS \"${i//\"/\\\"}\""
+done
+bash -c "$DOCKER run -v `pwd`:/app/ -it golang:app go $PARAMS"
