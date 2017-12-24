@@ -46,14 +46,21 @@ func main() {
 	vmisoPtr			:= flag.String("iso","","The name of the ISO from which to first-time-boot the vm")
 	vmoutputonlyPtr		:= flag.Bool("outputonly",false,"If set it will only output the commands it would execute, naturally without the correct parameter values set.")
 	vmversionPtr		:= flag.Bool("version",false,"show the version and date of the build")
-	// for some reason specifying start as a boolean, results in *vmstartPtr ALWAYS being false. This is just a work around
-	vmstartPtr			:= flag.Int("start",0,"If set it will start the vm once created")
-
+	vmstartPtr			:= flag.Bool("start",false,"If set it will start the vm once created")
 
 	flag.Parse()
+
 	var vm_unwantedoutput =""
 	
 	outputOnly := *vmoutputonlyPtr
+
+	// if *vmstartPtr>0 {
+	// 	fmt.Println("start is NOT 0")
+	// 	os.Exit(0)
+	// }
+	if *vmoutputonlyPtr {
+		fmt.Println("outputonly commands will not execute")
+	}
 
 	if *vmversionPtr {
 		fmt.Println("version " + version)
@@ -188,9 +195,10 @@ func main() {
 		fmt.Println(vm_unwantedoutput)
 	}
 	// READY!!!! 
-	if *vmstartPtr==1 {
+	if *vmstartPtr {
 		vm_unwantedoutput = exec_cmd("xe vm-start uuid=" + vm_uuid, outputOnly)
-	} else {
-		fmt.Println("Not starting")
+		if outputOnly {	
+			fmt.Println(vm_unwantedoutput)
+		}
 	}
 }
