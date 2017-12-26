@@ -5,8 +5,9 @@ DOCKER=`which docker`
 # https://stackoverflow.com/questions/1668649/how-to-keep-quotes-in-bash-arguments
 # What it actually does is quotes ALL parameters.
 PARAMS=''
+WORKDIR="/root"
 for i in "$@"; do 
     i="${i//\\/\\\\}"
     PARAMS="$PARAMS \"${i//\"/\\\"}\""
 done
-bash -c "$DOCKER run -v `pwd`:/app/ -it golang:app go $PARAMS"
+bash -c "$DOCKER run -v `pwd`:$WORKDIR -w $WORKDIR -it golang:latest go $PARAMS"
