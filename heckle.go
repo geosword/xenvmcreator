@@ -40,11 +40,6 @@ func exec_cmd(cmd string, outputonly bool) string {
 
 func createvm(template string, name string, cpus int,memory string, disksize string,network string, iso string) string {
 	var vm_unwantedoutput =""
-	if outputOnly {
-		fmt.Println("outputting only")
-	} else {
-		fmt.Println("executing commands")
-	}
 	
 	// STEP 0 validate the inputs
 	sizeCheck := regexp.MustCompile(`[0-9]+[GMK]iB`)
