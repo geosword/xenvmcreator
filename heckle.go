@@ -1,5 +1,5 @@
 package main
-import ( 
+import (
 	"fmt"
 	"os/exec"
 	"log"
@@ -9,16 +9,25 @@ import (
 	"strings"
 	"log/syslog"
 	"regexp"
-	//"encoding/csv"
+	"encoding/csv"
+	"bufio"
+	"io"
 )
-
-// use to "test" exec_cmd will output the command passed to it, rather than actually execute it
-// TODO make outputOnly a command line parameter. 
-// TODO find a more elegant way ( ? : notation ) for if outputOnly { ...} on the print blah stuff
-// const outputOnly=false
 
 var version string
 var outputOnly bool
+
+
+type vm struct {
+	template	string
+	name		string
+	cpus		uint64
+	memory		string
+	disksize	string
+	network		string
+	iso		string
+	startvm		bool
+}
 
 func exec_cmd(cmd string, outputonly bool) string {
 	if !outputonly  {
@@ -163,10 +172,10 @@ func createvm(template string, name string, cpus int,memory string, disksize str
 	if outputOnly {	
 		fmt.Println(vm_unwantedoutput)
 	}
-	
+
 	return vm_uuid
 
-	
+
 }
 
 func startvm(vm_uuid string) {
@@ -179,15 +188,15 @@ func startvm(vm_uuid string) {
 
 func main() {
 	vmtemplatePtr		:= flag.String("template","","The Name of the XenServer template to use")
-	vmnamePtr 			:= flag.String("name","blah","The name of the VM to create")
-	vmcpusPtr 			:= flag.Int("cpus",1,"the number of vCPUs to assign to the VM")
-	vmemoryPtr	 		:= flag.String("memory","1GiB","The number of MEGABYTES RAM to assign to the VM")
+	vmnamePtr		:= flag.String("name","blah","The name of the VM to create")
+	vmcpusPtr		:= flag.Int("cpus",1,"the number of vCPUs to assign to the VM")
+	vmemoryPtr		:= flag.String("memory","1GiB","The number of MEGABYTES RAM to assign to the VM")
 	vmdisksizePtr		:= flag.String("disksize","10GiB","The number of GiB to allocate to the disk")
 	vmnetworkPtr		:= flag.String("network","","The name of the network to connect the vm to")
-	vmisoPtr			:= flag.String("iso","","The name of the ISO from which to first-time-boot the vm")
+	vmisoPtr		:= flag.String("iso","","The name of the ISO from which to first-time-boot the vm")
 	vmversionPtr		:= flag.Bool("version",false,"show the version and date of the build")
-	vmstartPtr			:= flag.Bool("start",false,"If set it will start the vm once created")
-	// vmmanifest			:= flag.String("manifest","","A CSV file containing the template,name,cpus,memory,disksize,network,iso values for multiple hosts")
+	vmstartPtr		:= flag.Bool("start",false,"If set it will start the vm once created")
+	vmmanifest		:= flag.String("manifest","","A CSV file containing the template,name,cpus,memory,disksize,network,iso values for multiple hosts")
 	vmoutputonlyPtr		:= flag.Bool("outputonly",false,"If set it will only output the commands it would execute, naturally without the correct parameter values set.")
 
 	flag.Parse()
@@ -202,16 +211,46 @@ func main() {
 		fmt.Println("version " + version)
 		os.Exit(0)
 	}
-	
-    if e == nil {
-        log.SetOutput(logwriter)
-    }
 
-    var vm_uuid string
-    
-    vm_uuid = createvm(*vmtemplatePtr, *vmnamePtr, *vmcpusPtr, *vmemoryPtr, *vmdisksizePtr, *vmnetworkPtr, *vmisoPtr)
-    // READY!!!! 
-	if *vmstartPtr {
-		startvm(vm_uuid)
+	if e == nil {
+		log.SetOutput(logwriter)
+	}
+
+
+	//check to see if a manifest file has been provided. If it has we ignore any other parameters / arguments
+	if *vmmanifest!="" {
+		fmt.Println("Attempting to parse manifest file")
+		csvFile, _ := os.Open(*vmmanifest)
+		reader := csv.NewReader(bufio.NewReader(csvFile))
+		var vms []vm
+		for {
+			line, error := reader.Read()
+			if error == io.EOF {
+			    break
+			} else if error != nil {
+			    log.Fatal(error)
+			}
+			intcpus, _ := strconv.ParseUint(line[2],10,8)
+			vms = append(vms, vm{
+				template:	line[0],
+				name:		line[1],
+				cpus:		intcpus,
+				memory:		line[3],
+				disksize:	line[4],
+				network:	line[5],
+				iso:		line[6],
+				//startvm:	strconv.ParseBool(line[7]),
+			})
+		}
+		fmt.Println("yup, Did stuff. ")
+		fmt.Printf("%v",vms)
+	} else {
+		var vm_uuid string
+
+		vm_uuid = createvm(*vmtemplatePtr, *vmnamePtr, *vmcpusPtr, *vmemoryPtr, *vmdisksizePtr, *vmnetworkPtr, *vmisoPtr)
+		// READY!!!! 
+		if *vmstartPtr {
+			startvm(vm_uuid)
+		}
 	}
 }

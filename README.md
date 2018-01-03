@@ -23,3 +23,10 @@ Usage of heckle
 
 -version - show the version and date of the build
 
+## Compilation
+
+Use the dockergo script, which instigates a go container & builds / runs according to parameters passed to dockergo. Example:
+```
+./dockergo build -ldflags "-X main.version=`date -u +.%Y%m%d.%H%M%S`" heckle.go
+```
+As you can see, dockergo simply passes any parameters it gets to go within the golang:latest container
