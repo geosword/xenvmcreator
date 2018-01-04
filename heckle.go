@@ -47,9 +47,10 @@ func exec_cmd(cmd string, outputonly bool) string {
 	}
 }
 
+//TODO change this so it accepts the vm struct as a parameter
 func createvm(template string, name string, cpus int,memory string, disksize string,network string, iso string) string {
 	var vm_unwantedoutput =""
-	
+
 	// STEP 0 validate the inputs
 	sizeCheck := regexp.MustCompile(`[0-9]+[GMK]iB`)
 	matches := sizeCheck.FindAllString(memory,-1)
@@ -58,6 +59,13 @@ func createvm(template string, name string, cpus int,memory string, disksize str
 		os.Exit(1)
 	}
 
+	// STEP 0.5 check a VM with the same name doesnt exist. Yes, I know this is perferctly allowable in XenServer, but checking for duplicates based on name, means we dont need to maintain a database of UUIDs and in any case, duplicate VM names is silly.
+	var vm_uuid =""
+	vm_uuid = exec_cmd("xe vm-list --minimal name-label=\"" + name + "\"",outputOnly)
+	if vm_uuid!="" {
+		fmt.Println("vm " + name + " already exists")
+		return ""
+	}
 
 	matches = sizeCheck.FindAllString(disksize,-1)
 	if matches == nil {
@@ -72,7 +80,6 @@ func createvm(template string, name string, cpus int,memory string, disksize str
 
 	// STEP 1
 	// create the VM with the required template
-	var vm_uuid =""
 	vm_uuid = exec_cmd("xe vm-install template=\"" + template + "\" new-name-label=\"" + name + "\"",outputOnly)
 	// once we've output the command, assign a dummy value to the variables we'll need later on, to make it look vaugely like a real run
 	if outputOnly {
