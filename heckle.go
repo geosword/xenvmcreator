@@ -36,24 +36,22 @@ func exec_cmd(cmd string, outputonly bool) string {
 		output := strings.TrimSpace(string(out))
 		log.Print("TRIMMED Output was [" + output + "]")
 		if err != nil {
-			// TODO roll back whats been done if a vital step fails.
 			log.Fatal(err)
 			os.Exit(1)
 		}
-		// trim off the CR at the end of any output
 		return output
 	} else {
 		return cmd
 	}
 }
 
-//TODO change this so it accepts the vm struct as a parameter
-func createvm(template string, name string, cpus int,memory string, disksize string,network string, iso string) string {
+func createvm(vmdef vm) string {
 	var vm_unwantedoutput =""
 
+	log.Print("Creating vm [" + vmdef.name + "]")
 	// STEP 0 validate the inputs
 	sizeCheck := regexp.MustCompile(`[0-9]+[GMK]iB`)
-	matches := sizeCheck.FindAllString(memory,-1)
+	matches := sizeCheck.FindAllString(vmdef.memory,-1)
 	if matches == nil {
 		fmt.Println("Memory must be a number followed by (G|M|K)iB")
 		os.Exit(1)
@@ -61,26 +59,26 @@ func createvm(template string, name string, cpus int,memory string, disksize str
 
 	// STEP 0.5 check a VM with the same name doesnt exist. Yes, I know this is perferctly allowable in XenServer, but checking for duplicates based on name, means we dont need to maintain a database of UUIDs and in any case, duplicate VM names is silly.
 	var vm_uuid =""
-	vm_uuid = exec_cmd("xe vm-list --minimal name-label=\"" + name + "\"",outputOnly)
+	vm_uuid = exec_cmd("xe vm-list --minimal name-label=\"" + vmdef.name + "\"",outputOnly)
 	if vm_uuid!="" {
-		fmt.Println("vm " + name + " already exists")
+		fmt.Println("vm " + vmdef.name + " already exists")
 		return ""
 	}
 
-	matches = sizeCheck.FindAllString(disksize,-1)
+	matches = sizeCheck.FindAllString(vmdef.disksize,-1)
 	if matches == nil {
 		fmt.Println("Disk size must be a number followed by (G|M|K)iB")
 		os.Exit(1)
 	}
 
-	if cpus < 1 {
+	if vmdef.cpus < 1 {
 		fmt.Println("CPUs must be a positive integer")
 		os.Exit(1)
 	}
 
 	// STEP 1
 	// create the VM with the required template
-	vm_uuid = exec_cmd("xe vm-install template=\"" + template + "\" new-name-label=\"" + name + "\"",outputOnly)
+	vm_uuid = exec_cmd("xe vm-install template=\"" + vmdef.template + "\" new-name-label=\"" + vmdef.name + "\"",outputOnly)
 	// once we've output the command, assign a dummy value to the variables we'll need later on, to make it look vaugely like a real run
 	if outputOnly {
 		fmt.Println(vm_uuid)
@@ -108,14 +106,14 @@ func createvm(template string, name string, cpus int,memory string, disksize str
 		vm_vdi_uuid="vm_vdi_uuid"
 	}
 	//xe vdi-resize uuid=[VDI uuid] disk-size=20GiB
-	vm_unwantedoutput = exec_cmd("xe vdi-resize uuid=" + vm_vdi_uuid + " disk-size=" + disksize , outputOnly)
+	vm_unwantedoutput = exec_cmd("xe vdi-resize uuid=" + vm_vdi_uuid + " disk-size=" + vmdef.disksize , outputOnly)
 	if outputOnly {
 		fmt.Println(vm_unwantedoutput)
 	}
 
 	// STEP 4 now we add a cd drive and "insert" the cd image
 	
-	vm_unwantedoutput = exec_cmd("xe vm-cd-add uuid=" + vm_uuid + " cd-name=\"" + iso + "\" device=3",outputOnly)
+	vm_unwantedoutput = exec_cmd("xe vm-cd-add uuid=" + vm_uuid + " cd-name=\"" + vmdef.iso + "\" device=3",outputOnly)
 	if outputOnly {
 		fmt.Println(vm_unwantedoutput)
 	}
@@ -141,7 +139,7 @@ func createvm(template string, name string, cpus int,memory string, disksize str
 
 	// STEP 5 now on to setting up the network
 	//xe network-list --minimal name-label="CG 1072"	
-	var vm_network_uuid = exec_cmd("xe network-list --minimal name-label=\"" + network + "\"", outputOnly)
+	var vm_network_uuid = exec_cmd("xe network-list --minimal name-label=\"" + vmdef.network + "\"", outputOnly)
 	
 	if outputOnly {
 		fmt.Println(vm_network_uuid)
@@ -157,18 +155,18 @@ func createvm(template string, name string, cpus int,memory string, disksize str
 	// STEP 6 now set the RAM accordingly
 	// xe vm-memory-limits-set dynamic-max=VM MEMORY dynamic-min=VM MEMORY static-max=VM MEMORY static-min=VM MEMORY name-label="newVM"
 	vm_unwantedoutput = exec_cmd("xe vm-memory-limits-set dynamic-max=" + 
-				memory + " dynamic-min=" + memory + " static-max=" + memory + 
-					" static-min=" + memory + " uuid=" + vm_uuid, outputOnly)
+				vmdef.memory + " dynamic-min=" + vmdef.memory + " static-max=" + vmdef.memory + 
+					" static-min=" + vmdef.memory + " uuid=" + vm_uuid, outputOnly)
 	if outputOnly {	
 		fmt.Println(vm_unwantedoutput)
 	}
 
 	// STEP 7 set the number of VCPUs
-	vm_unwantedoutput = exec_cmd("xe vm-param-set uuid=" + vm_uuid + " platform:cores-per-socket=1 VCPUs-max=" + strconv.Itoa(cpus), outputOnly)
+	vm_unwantedoutput = exec_cmd("xe vm-param-set uuid=" + vm_uuid + " platform:cores-per-socket=1 VCPUs-max=" + strconv.Itoa(int(vmdef.cpus)), outputOnly)
 	if outputOnly {	
 		fmt.Println(vm_unwantedoutput)
 	}
-	vm_unwantedoutput = exec_cmd("xe vm-param-set uuid=" + vm_uuid + " platform:cores-per-socket=1 VCPUs-at-startup=" + strconv.Itoa(cpus), outputOnly)
+	vm_unwantedoutput = exec_cmd("xe vm-param-set uuid=" + vm_uuid + " platform:cores-per-socket=1 VCPUs-at-startup=" + strconv.Itoa(int(vmdef.cpus)), outputOnly)
 	if outputOnly {	
 		fmt.Println(vm_unwantedoutput)
 	}
@@ -196,7 +194,7 @@ func startvm(vm_uuid string) {
 func main() {
 	vmtemplatePtr		:= flag.String("template","","The Name of the XenServer template to use")
 	vmnamePtr		:= flag.String("name","blah","The name of the VM to create")
-	vmcpusPtr		:= flag.Int("cpus",1,"the number of vCPUs to assign to the VM")
+	vmcpusPtr		:= flag.Uint64("cpus",1,"the number of vCPUs to assign to the VM")
 	vmemoryPtr		:= flag.String("memory","1GiB","The number of MEGABYTES RAM to assign to the VM")
 	vmdisksizePtr		:= flag.String("disksize","10GiB","The number of GiB to allocate to the disk")
 	vmnetworkPtr		:= flag.String("network","","The name of the network to connect the vm to")
@@ -224,12 +222,11 @@ func main() {
 	}
 
 
+	var vms []vm
 	//check to see if a manifest file has been provided. If it has we ignore any other parameters / arguments
 	if *vmmanifest!="" {
-		fmt.Println("Attempting to parse manifest file")
 		csvFile, _ := os.Open(*vmmanifest)
 		reader := csv.NewReader(bufio.NewReader(csvFile))
-		var vms []vm
 		for {
 			line, error := reader.Read()
 			if error == io.EOF {
@@ -237,27 +234,52 @@ func main() {
 			} else if error != nil {
 			    log.Fatal(error)
 			}
-			intcpus, _ := strconv.ParseUint(line[2],10,8)
-			vms = append(vms, vm{
-				template:	line[0],
-				name:		line[1],
-				cpus:		intcpus,
-				memory:		line[3],
-				disksize:	line[4],
-				network:	line[5],
-				iso:		line[6],
-				//startvm:	strconv.ParseBool(line[7]),
-			})
+			// check we have the correct number of entries
+			if len(line)==8 {
+				intcpus, _ := strconv.ParseUint(line[5],10,8)
+				boolstartvm, _ := strconv.ParseBool(line[7])
+				vms = append(vms, vm{
+					template:	line[0],
+					name:		line[1],
+					cpus:		intcpus,
+					memory:		line[2],
+					disksize:	line[3],
+					network:	line[6],
+					iso:		line[4],
+					startvm:	boolstartvm,
+				})
+			} else {
+				fmt.Println("This line in the manifest looks wrong:")
+				fmt.Printf("%v\n",line)
+				fmt.Println("There are not enough values, there needs to be exactly 8")
+				os.Exit(1)
+			}
 		}
-		fmt.Println("yup, Did stuff. ")
-		fmt.Printf("%v",vms)
 	} else {
-		var vm_uuid string
+		vms = append(vms, vm{
+			template:	*vmtemplatePtr,
+			name:		*vmnamePtr,
+			cpus:		*vmcpusPtr,
+			memory:		*vmemoryPtr,
+			disksize:	*vmdisksizePtr,
+			network:	*vmnetworkPtr,
+			iso:		*vmisoPtr,
+			startvm:	*vmstartPtr,
+		})
 
-		vm_uuid = createvm(*vmtemplatePtr, *vmnamePtr, *vmcpusPtr, *vmemoryPtr, *vmdisksizePtr, *vmnetworkPtr, *vmisoPtr)
-		// READY!!!! 
-		if *vmstartPtr {
-			startvm(vm_uuid)
+	}
+	// now create the vms and start them if appropiate
+	var vm_uuid string
+	for _, element := range vms {
+		vm_uuid = createvm(element)
+		fmt.Printf("%+v ", element);
+		if vm_uuid!="" {
+			fmt.Print("[created] ");
+			if element.startvm {
+				fmt.Print("[started]")
+				startvm(vm_uuid)
+			}
+			fmt.Println("")
 		}
 	}
 }
