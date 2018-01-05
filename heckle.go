@@ -16,7 +16,7 @@ import (
 
 var version string
 var outputOnly bool
-
+var preseedLocation string
 
 type vm struct {
 	template	string
@@ -50,6 +50,8 @@ func createvm(vmdef vm) string {
 
 	log.Print("Creating vm [" + vmdef.name + "]")
 	// STEP 0 validate the inputs
+	// TODO move these validation checks to main. It makes no sense for them to be here.
+
 	sizeCheck := regexp.MustCompile(`[0-9]+[GMK]iB`)
 	matches := sizeCheck.FindAllString(vmdef.memory,-1)
 	if matches == nil {
@@ -88,6 +90,7 @@ func createvm(vmdef vm) string {
 	// STEP 2 now we need to disable booting from the automatically assigned disk
 	var vm_disk_uuid = exec_cmd("xe vbd-list --minimal vm-uuid=" + vm_uuid + " userdevice=0",outputOnly)
 	// get the uuid of the disk assigned to our new vm
+	// TODO rename the disk to something derived from the vmname. Currently its 0, which is pretty unhelpful
 	// now disable booting from it (we want to boot from the cdrom)
 	if outputOnly {
 		fmt.Println(vm_disk_uuid)
@@ -173,7 +176,7 @@ func createvm(vmdef vm) string {
 
 	// STEP 8 set the boot parameters so that it goes and gets our preseed file and doesnt ask any questions
 	// xe vm-param-set PV-args="auto priority=critical keymap=gb locale=en_GB hostname=preseedtest url=http://10.0.1.10/preseed-stretch.cfg -- quiet console=hvc0" vm=VMNAME
-	vm_unwantedoutput = exec_cmd("xe vm-param-set PV-args=\"auto priority=critical keymap=gb locale=en_GB hostname=preseedtest url=http://10.0.1.10/preseed-stretch.cfg -- quiet console=hvc0\" uuid=" + vm_uuid, outputOnly)
+	vm_unwantedoutput = exec_cmd("xe vm-param-set PV-args=\"auto priority=critical keymap=gb locale=en_GB hostname=" + vmdef.name  + " url=" + preseedLocation + " -- quiet console=hvc0\" uuid=" + vm_uuid, outputOnly)
 	if outputOnly {	
 		fmt.Println(vm_unwantedoutput)
 	}
@@ -203,10 +206,21 @@ func main() {
 	vmstartPtr		:= flag.Bool("start",false,"If set it will start the vm once created")
 	vmmanifest		:= flag.String("manifest","","A CSV file containing the template,name,cpus,memory,disksize,network,iso values for multiple hosts")
 	vmoutputonlyPtr		:= flag.Bool("outputonly",false,"If set it will only output the commands it would execute, naturally without the correct parameter values set.")
+	vmpreseedlocationPtr	:= flag.String("preseedurl","http://10.0.1.10/preseed-stretch.cfg","Where to fetch the preseed file from")
 
 	flag.Parse()
 	outputOnly = *vmoutputonlyPtr
 	logwriter, e := syslog.New(syslog.LOG_NOTICE, "heckle")
+
+
+	preseedCheck := regexp.MustCompile(`http:\/\/`)
+	matches := preseedCheck.FindAllString(*vmpreseedlocationPtr,-1)
+	if matches == nil {
+		fmt.Println("preseed location must be over http://");
+		os.Exit(1)
+	} else {
+		preseedLocation = *vmpreseedlocationPtr
+	}
 
 	if outputOnly {
 		fmt.Println("outputonly commands will not execute")
@@ -261,6 +275,7 @@ func main() {
 			name:		*vmnamePtr,
 			cpus:		*vmcpusPtr,
 			memory:		*vmemoryPtr,
+			//TODO allow to define Which Storage SR the disk is created on
 			disksize:	*vmdisksizePtr,
 			network:	*vmnetworkPtr,
 			iso:		*vmisoPtr,
