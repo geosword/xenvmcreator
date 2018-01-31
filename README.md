@@ -30,3 +30,8 @@ Use the dockergo script, which instigates a go container & builds / runs accordi
 ./dockergo build -ldflags "-X main.version=`date -u +.%Y%m%d.%H%M%S`" heckle.go
 ```
 As you can see, dockergo simply passes any parameters it gets to go within the golang:latest container
+
+Still to do:
+make sure the VDI assigned to the VM is named appropriately. Currently is just called 0
+Allow the addition of multiple disks and network interfaces
+
